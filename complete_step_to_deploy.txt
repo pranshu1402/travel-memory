@@ -1,0 +1,131 @@
+Steps to Deploy an application and establish a connection between Frontend, Backend, and the database.
+
+***Configure Mongo DB:***
+1. Need to open the cloud Mongo DB website and create a new cluster. For a free account, we have the option to create one free cluster.
+2. To create a cluster, we need to click on Create and select Shared, then select Cluster Details add the name of the cluster, and click on Create a cluster.
+3. Create a username and password for the cluster.
+4. Configure network whitelisting, enable network traffic from 0.0.0.0:0
+5. Click on the cluster name and click on Connect. 
+6. Click on compass, and select I have MongoDB compass installed.
+7. Keep the connection string link handy, (to be added in the backend .env file)
+
+
+*** Launch an EC2 Instance in AWS ***
+1. Select ubuntu os
+2. Select t2.micro instance
+3. Create a security group with http, https, ssh ports open in inbound rules.
+4. Select key pair (whose private key is available in personal system | if not create a new key pair)
+5. Launch Instance
+
+
+*** Pre-Requisites post connecting with EC2 Instance: *** 
+1. Install node js v18 which is the stable version by this command
+    `curl -s https://deb.nodesource.com/setup_18.x | sudo bash`
+    `sudo apt install nodejs -y`
+    `node -v`  # to check the version of node js
+2. Clone the repo:
+`sudo git clone https://github.com/UnpredictablePrashant/TravelMemory.git`
+3. Configure MongoDB cluster and get the connection link.
+
+****** Configuring backend ****** 
+1. Go inside backend project folder:
+`cd /home/ubuntu/TravelMemory/backend`
+2. Install all the dependencies using the below command
+`npm install`
+3. Create a .env file using the below command
+`sudo nano .env`
+4. Put below contents in env file to establish connection link to database:
+```
+MONGO_URI = "mongodb+srv://<username>:<password>@travelmemory.h5dvcda.mongodb.net/"
+PORT = 3001
+```
+5. Install process manager pm2 to keep the backend always up and running/restart in case of failures:
+`npm i -g pm2`
+6. Create an ecosystem.config.js file within backend directory:
+`sudo nano ecosystem.config.js`
+7. Paste the following content in the file:
+```
+module.exports = {
+  apps: [
+    {
+      name: "backend-app",
+      script: "index.js",
+      watch: false,
+      autorestart: true,
+      env: {
+        NODE_ENV: "production"
+      },
+      env_file: ".env"
+    },
+  ],
+};
+```
+
+8. Start the app using the ecosystem config
+`pm2 start ecosystem.config.js`
+9. Next preserve the newly created process and to setup restart on reboots:
+`pm2 save && pm2 startup`
+10. To check if the backend logs:
+`pm2 logs backend-app`
+11. To check if backend is running hit below command (It should print 'hello world'):
+`curl http://localhost:3001/hello`
+
+****** Configuring Frontend ******
+1. Go inside frontend project folder:
+`cd /home/ubuntu/TravelMemory/frontend`
+2. Install all the dependencies using the below command
+`npm install`
+3. Create a .env file/Edit existing using the below command
+`sudo nano .env`
+4. Paste below property in the same (<purchased domain name>/api)
+REACT_APP_BACKEND_URL=https://tm.pgcodes.in/api
+6. Post that create the static build files via below command:
+`npm run build`
+7. Checkout the generated files via: 
+`ls build`
+8. Copy all the build files directly to nginx root directory:
+sudo cp -a build /var/www/html
+
+*********** Setting NGINX *************
+1. Go to default config
+`/etc/nginx/sites-enabled`
+2. Open default config
+`sudo nano default`
+3. Paste below block before location / block : 
+```
+location /api/ {
+    rewrite ^/api(/.*)$ $1 break;
+    proxy_pass http://localhost:3001;
+    
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_cache_bypass $http_upgrade;
+}
+
+## To always load react app on any other route
+location / {
+        try_files $uri $uri/ /index.html;
+}
+
+```
+4. Restart nginx
+`sudo systemctl reload nginx`
+`sudo systemctl restart nginx`
+
+************* Setup similar EC2 Instances ********
+1. Go to Console > EC2 Instances 
+2. Select 1st Instance & Right Click
+3. Create AMI from 1st EC2 Instance
+4. Launch another EC2 instance from created AMI
+
+********* Set UP Load Balancer **********
+1. Go to EC2 Load Balancer
+2. Choose Application Load Balancer
+3. Create a Target group (with created ec2 instances listening on port 80)
+4. Register a Certificate in ACM Registry
+5. Link the Target group to Load Balancer with listener rules (http: 80, https: 443)
+6. Link ACM Certificate with Load balancer
+7. Save all updates
+8. Copy the Generated DNS Name & add a CNAME Record in Cloudflare.

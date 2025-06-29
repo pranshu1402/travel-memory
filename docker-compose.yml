@@ -1,0 +1,25 @@
+version: '1.0'
+
+services:
+  backend:
+    container_name: tm-backend
+    image: travel-memory-backend
+    # build:
+    #   context: ./backend
+    #   dockerfile: Dockerfile
+    ports:
+      - 3001:3001
+    env_file:
+      - ./backend/.env
+  frontend:
+    container_name: tm-frontend
+    image: travel-memory-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=http://backend:3001
