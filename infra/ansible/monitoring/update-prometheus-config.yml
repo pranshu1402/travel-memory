@@ -1,0 +1,43 @@
+---
+# Ansible Playbook to Update Prometheus Configuration with Alert Rules
+# Run this after initial Prometheus setup
+
+- name: Update Prometheus Configuration with Alert Rules
+  hosts: web_servers
+  become: yes
+  vars:
+    prometheus_config_dir: /etc/prometheus
+
+  tasks:
+    - name: Copy Prometheus alert rules
+      copy:
+        src: "{{ item }}"
+        dest: "{{ prometheus_config_dir }}/rules/{{ item | basename }}"
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+      loop:
+        - "{{ playbook_dir }}/../prometheus-rules/alerts.yml"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Reload Prometheus configuration
+      uri:
+        url: http://localhost:9090/-/reload
+        method: POST
+      register: prometheus_reload
+      ignore_errors: yes
+
+    - name: Verify Prometheus configuration
+      uri:
+        url: http://localhost:9090/api/v1/status/config
+        method: GET
+      register: prometheus_config_status
+      retries: 3
+      delay: 2
+      until: prometheus_config_status.status == 200
+
+    - name: Display Prometheus configuration status
+      debug:
+        msg: "Prometheus configuration reloaded successfully"
+

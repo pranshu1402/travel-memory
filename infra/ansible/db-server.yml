@@ -93,36 +93,61 @@
         timeout: 30
 
     # Create MongoDB database and user
+    - name: Check if MongoDB user exists
+      shell: |
+        mongosh {{ mongo_db_name }} --eval "
+        try {
+          db.getUser('{{ mongo_db_user }}');
+          quit(0);
+        } catch(e) {
+          if (e.message.includes('UserNotFound')) {
+            quit(1);
+          } else {
+            quit(2);
+          }
+        }
+        " --quiet
+      register: mongo_user_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: yes
+
     - name: Create MongoDB database and user
       shell: |
         mongosh --eval "
         use {{ mongo_db_name }};
-        db.createUser({
-          user: '{{ mongo_db_user }}',
-          pwd: '{{ mongo_db_password }}',
-          roles: [{ role: 'readWrite', db: '{{ mongo_db_name }}' }]
-        });
-        "
-      args:
-        creates: /tmp/mongo_user_created
+        try {
+          db.createUser({
+            user: '{{ mongo_db_user }}',
+            pwd: '{{ mongo_db_password }}',
+            roles: [{ role: 'readWrite', db: '{{ mongo_db_name }}' }]
+          });
+          print('User created successfully');
+        } catch(e) {
+          if (e.message.includes('already exists')) {
+            print('User already exists');
+            quit(0);
+          } else {
+            throw(e);
+          }
+        }
+        " --quiet
       register: mongo_user_create
-      changed_when: true
-
-    - name: Mark MongoDB user as created
-      file:
-        path: /tmp/mongo_user_created
-        state: touch
-      when: mongo_user_create.changed
+      changed_when: "'created successfully' in mongo_user_create.stdout"
+      when: mongo_user_check.rc != 0
+      failed_when: mongo_user_create.rc != 0 and "already exists" not in mongo_user_create.stdout | default("")
 
     - name: Verify MongoDB user creation
       shell: |
-        mongosh {{ mongo_db_name }} -u {{ mongo_db_user }} -p {{ mongo_db_password }} --eval "db.getName()"
+        mongosh {{ mongo_db_name }} -u {{ mongo_db_user }} -p {{ mongo_db_password }} --eval "db.getName()" --quiet
       register: mongo_verify
       changed_when: false
+      failed_when: mongo_verify.rc != 0
 
     - name: Display MongoDB verification result
       debug:
-        msg: "MongoDB user verification: {{ mongo_verify.stdout }}"
+        msg: "MongoDB user verification successful: {{ mongo_verify.stdout }}"
+      when: mongo_verify.rc == 0
 
     # UFW Firewall Configuration for MongoDB
     - name: Allow SSH through firewall

@@ -1,0 +1,53 @@
+---
+# Ansible Playbook for Monitoring Firewall Rules
+
+- name: Configure Firewall Rules for Monitoring
+  hosts: web_servers
+  become: yes
+
+  tasks:
+    - name: Allow Prometheus port through firewall
+      ufw:
+        rule: allow
+        port: '9090'
+        proto: tcp
+        comment: 'Prometheus access'
+
+    - name: Allow Grafana port through firewall
+      ufw:
+        rule: allow
+        port: '3000'
+        proto: tcp
+        comment: 'Grafana access'
+
+    - name: Display UFW status
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+
+    - name: Show firewall status
+      debug:
+        msg: "{{ ufw_status.stdout_lines }}"
+
+- name: Configure Firewall Rules for MongoDB Exporter
+  hosts: db_servers
+  become: yes
+
+  tasks:
+    - name: Allow MongoDB Exporter port from web server only
+      ufw:
+        rule: allow
+        port: '9216'
+        proto: tcp
+        from_ip: "{{ hostvars[groups['web_servers'][0]]['ansible_default_ipv4']['address'] | default(web_server_private_ip) }}"
+        comment: 'MongoDB Exporter access from Prometheus server'
+
+    - name: Display UFW status
+      command: ufw status verbose
+      register: ufw_status
+      changed_when: false
+
+    - name: Show firewall status
+      debug:
+        msg: "{{ ufw_status.stdout_lines }}"
+

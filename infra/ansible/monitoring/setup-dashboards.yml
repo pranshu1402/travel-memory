@@ -1,0 +1,47 @@
+---
+# Ansible Playbook to Setup Grafana Dashboards
+# Run this after Grafana installation
+
+- name: Setup Grafana Dashboards
+  hosts: web_servers
+  become: yes
+  vars:
+    grafana_admin_user: admin
+    grafana_admin_password: "{{ grafana_admin_password | default('admin') }}"
+    grafana_port: 3000
+    grafana_dashboards_dir: /var/lib/grafana/dashboards
+
+  pre_tasks:
+    - name: Set grafana_admin_password with default
+      set_fact:
+        grafana_admin_password: "{{ grafana_admin_password | default('admin') }}"
+      when: grafana_admin_password is not defined
+
+  tasks:
+    - name: Wait for Grafana API to be ready
+      uri:
+        url: "http://localhost:{{ grafana_port }}/api/health"
+        method: GET
+      register: grafana_health
+      until: grafana_health.status == 200
+      retries: 10
+      delay: 5
+
+    - name: Copy Grafana dashboards
+      copy:
+        src: "{{ item }}"
+        dest: "{{ grafana_dashboards_dir }}/{{ item | basename }}"
+        owner: grafana
+        group: grafana
+        mode: '0644'
+      loop:
+        - "{{ playbook_dir }}/../../grafana-dashboards/backend-metrics.json"
+        - "{{ playbook_dir }}/../../grafana-dashboards/mongodb-metrics.json"
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: yes
+
+    - name: Display dashboard setup status
+      debug:
+        msg: "Grafana dashboards are available at http://localhost:{{ grafana_port }}/dashboards"
+

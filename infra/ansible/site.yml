@@ -21,6 +21,12 @@
 # Web Server Setup (depends on database being ready)
 - import_playbook: web-server.yml
 
+# Monitoring Setup
+- import_playbook: monitoring/site.yml
+- import_playbook: monitoring/firewall-rules.yml
+- import_playbook: monitoring/update-prometheus-config.yml
+- import_playbook: monitoring/setup-dashboards.yml
+
 - name: Final Status Check
   hosts: all
   become: yes

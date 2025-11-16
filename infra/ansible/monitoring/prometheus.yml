@@ -1,0 +1,166 @@
+---
+# Ansible Playbook for Prometheus Installation on Web Server
+
+- name: Install and Configure Prometheus
+  hosts: web_servers
+  become: yes
+  vars:
+    prometheus_version: "2.48.0"
+    prometheus_user: prometheus
+    prometheus_group: prometheus
+    prometheus_dir: /opt/prometheus
+    prometheus_config_dir: /etc/prometheus
+    prometheus_data_dir: /var/lib/prometheus
+
+  tasks:
+    - name: Create prometheus user
+      user:
+        name: "{{ prometheus_user }}"
+        system: yes
+        shell: /bin/false
+        home: "{{ prometheus_dir }}"
+        create_home: no
+        comment: "Prometheus monitoring system"
+
+    - name: Create prometheus directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0755'
+      loop:
+        - "{{ prometheus_dir }}"
+        - "{{ prometheus_config_dir }}"
+        - "{{ prometheus_data_dir }}"
+        - "{{ prometheus_config_dir }}/rules"
+
+    - name: Download Prometheus
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz
+        mode: '0644'
+
+    - name: Extract Prometheus
+      unarchive:
+        src: /tmp/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz
+        dest: /tmp
+        remote_src: yes
+
+    - name: Copy Prometheus binaries
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: "{{ prometheus_dir }}/{{ item | basename }}"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0755'
+        remote_src: yes
+      loop:
+        - prometheus
+        - promtool
+
+    - name: Create Prometheus configuration file
+      copy:
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+            external_labels:
+              monitor: 'travelmemory-monitor'
+
+          rule_files:
+            - "/etc/prometheus/rules/*.yml"
+
+          scrape_configs:
+            # Prometheus itself
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            # Node.js Backend Application
+            - job_name: 'nodejs-backend'
+              static_configs:
+                - targets: ['localhost:3001']
+              metrics_path: '/metrics'
+              scrape_interval: 10s
+
+            # MongoDB Exporter
+            - job_name: 'mongodb-exporter'
+              static_configs:
+                - targets: ['172.31.66.174:9216']
+              scrape_interval: 15s
+
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        mode: '0644'
+
+    - name: Create Prometheus systemd service
+      copy:
+        content: |
+          [Unit]
+          Description=Prometheus Monitoring System
+          Documentation=https://prometheus.io/docs/introduction/overview/
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ prometheus_user }}
+          Group={{ prometheus_group }}
+          ExecStart={{ prometheus_dir }}/prometheus \
+            --config.file={{ prometheus_config_dir }}/prometheus.yml \
+            --storage.tsdb.path={{ prometheus_data_dir }} \
+            --storage.tsdb.retention.time=30d \
+            --web.console.templates={{ prometheus_config_dir }}/consoles \
+            --web.console.libraries={{ prometheus_config_dir }}/console_libraries \
+            --web.listen-address=0.0.0.0:9090 \
+            --web.enable-lifecycle
+
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/prometheus.service
+        mode: '0644'
+
+    - name: Set ownership for Prometheus directories
+      file:
+        path: "{{ item }}"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_group }}"
+        recurse: yes
+      loop:
+        - "{{ prometheus_config_dir }}"
+        - "{{ prometheus_data_dir }}"
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and enable Prometheus service
+      systemd:
+        name: prometheus
+        state: started
+        enabled: yes
+
+    - name: Wait for Prometheus to be ready
+      uri:
+        url: http://localhost:9090/-/ready
+        method: GET
+      register: prometheus_ready
+      until: prometheus_ready.status == 200
+      retries: 10
+      delay: 5
+      ignore_errors: yes
+
+    - name: Check Prometheus status
+      systemd:
+        name: prometheus
+      register: prometheus_status
+
+    - name: Display Prometheus status
+      debug:
+        msg: "Prometheus is {{ prometheus_status.status.ActiveState }} at http://localhost:9090"
+

@@ -1,0 +1,129 @@
+---
+# Ansible Playbook for Grafana Installation on Web Server
+
+- name: Install and Configure Grafana
+  hosts: web_servers
+  become: yes
+  vars:
+    grafana_version: "10.2.0"
+    grafana_user: grafana
+    grafana_group: grafana
+    grafana_port: 3000
+    grafana_admin_user: admin
+    grafana_admin_password: "{{ grafana_admin_password | default('admin') }}"
+
+  pre_tasks:
+    - name: Set grafana_admin_password with default
+      set_fact:
+        grafana_admin_password: "{{ grafana_admin_password | default('admin') }}"
+      when: grafana_admin_password is not defined
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - adduser
+          - libfontconfig1
+          - wget
+        state: present
+        update_cache: yes
+
+    - name: Download Grafana
+      get_url:
+        url: "https://dl.grafana.com/enterprise/release/grafana-enterprise_{{ grafana_version }}_amd64.deb"
+        dest: /tmp/grafana-enterprise_{{ grafana_version }}_amd64.deb
+        mode: '0644'
+      register: grafana_download
+
+    - name: Install Grafana
+      apt:
+        deb: /tmp/grafana-enterprise_{{ grafana_version }}_amd64.deb
+        state: present
+
+    - name: Create Grafana provisioning directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ grafana_user }}"
+        group: "{{ grafana_group }}"
+        mode: '0755'
+      loop:
+        - /etc/grafana/provisioning/datasources
+        - /etc/grafana/provisioning/dashboards
+        - /var/lib/grafana/dashboards
+
+    - name: Configure Grafana datasource for Prometheus
+      copy:
+        content: |
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              access: proxy
+              url: http://localhost:9090
+              isDefault: true
+              editable: true
+              jsonData:
+                timeInterval: "15s"
+        dest: /etc/grafana/provisioning/datasources/prometheus.yml
+        owner: "{{ grafana_user }}"
+        group: "{{ grafana_group }}"
+        mode: '0644'
+
+    - name: Configure Grafana dashboard provisioning
+      copy:
+        content: |
+          apiVersion: 1
+          providers:
+            - name: 'Default'
+              orgId: 1
+              folder: ''
+              type: file
+              disableDeletion: false
+              updateIntervalSeconds: 10
+              allowUiUpdates: true
+              options:
+                path: /var/lib/grafana/dashboards
+        dest: /etc/grafana/provisioning/dashboards/default.yml
+        owner: "{{ grafana_user }}"
+        group: "{{ grafana_group }}"
+        mode: '0644'
+
+    - name: Update Grafana configuration
+      lineinfile:
+        path: /etc/grafana/grafana.ini
+        regexp: "^{{ item.regexp }}"
+        line: "{{ item.line }}"
+        backup: yes
+      loop:
+        - { regexp: '^;admin_user', line: 'admin_user = {{ grafana_admin_user }}' }
+        - { regexp: '^;admin_password', line: 'admin_password = {{ grafana_admin_password }}' }
+        - { regexp: '^;http_port', line: 'http_port = {{ grafana_port }}' }
+        - { regexp: '^;http_addr', line: 'http_addr = 0.0.0.0' }
+        - { regexp: '^allow_embedding', line: 'allow_embedding = true' }
+
+    - name: Start and enable Grafana service
+      systemd:
+        name: grafana-server
+        state: started
+        enabled: yes
+
+    - name: Wait for Grafana to be ready
+      uri:
+        url: http://localhost:{{ grafana_port }}/api/health
+        method: GET
+      register: grafana_ready
+      until: grafana_ready.status == 200
+      retries: 15
+      delay: 5
+      ignore_errors: yes
+
+    - name: Check Grafana status
+      systemd:
+        name: grafana-server
+      register: grafana_status
+
+    - name: Display Grafana status
+      debug:
+        msg: "Grafana is {{ grafana_status.status.ActiveState }} at http://localhost:{{ grafana_port }} (admin/{{ grafana_admin_password }})"
+
