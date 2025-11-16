@@ -1,0 +1,8 @@
+Name: Pranshu Goyal
+Batch: B11
+
+Github Repo: https://github.com/pranshu1402/travel-memory
+
+Screenshots added in: ./screenshots directory
+Terraform Scripts for Infra Setup: ./infra/Terraform
+Ansible Scripts for Configuring and running application: ./infra/Ansible

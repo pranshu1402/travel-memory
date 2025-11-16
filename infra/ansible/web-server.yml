@@ -156,7 +156,11 @@
 
     - name: Display backend health check result
       debug:
-        msg: "Backend is running: {{ backend_health.content }}"
+        msg: |
+          Backend health check:
+          Status: {{ backend_health.status | default('N/A') }}
+          Content: {{ backend_health.content | default(backend_health.body | default('N/A')) | string }}
+          URL: {{ backend_health.url | default('N/A') }}
 
     # Frontend Setup
     - name: Install frontend dependencies
@@ -172,9 +176,9 @@
         mode: '0644'
 
     - name: Build frontend
-      npm:
-        path: "{{ app_dir }}/frontend"
-        run: build
+      command: npm run build
+      args:
+        chdir: "{{ app_dir }}/frontend"
 
     - name: Create nginx web directory if not exists
       file:
@@ -195,6 +199,7 @@
         src: "{{ app_dir }}/frontend/build/"
         dest: /var/www/html/
         mode: preserve
+        remote_src: yes
 
     # Nginx Configuration
     - name: Configure Nginx for React app and API proxy
