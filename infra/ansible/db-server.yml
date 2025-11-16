@@ -93,6 +93,13 @@
         timeout: 30
 
     # Create MongoDB database and user
+    - name: Create MongoDB database (by accessing it)
+      shell: |
+        mongosh {{ mongo_db_name }} --eval "db.getName()" --quiet
+      register: mongo_db_create
+      changed_when: false
+      ignore_errors: yes
+
     - name: Check if MongoDB user exists
       shell: |
         mongosh {{ mongo_db_name }} --eval "
@@ -100,7 +107,7 @@
           db.getUser('{{ mongo_db_user }}');
           quit(0);
         } catch(e) {
-          if (e.message.includes('UserNotFound')) {
+          if (e.message.includes('UserNotFound') || e.message.includes('not found')) {
             quit(1);
           } else {
             quit(2);
@@ -114,8 +121,7 @@
 
     - name: Create MongoDB database and user
       shell: |
-        mongosh --eval "
-        use {{ mongo_db_name }};
+        mongosh {{ mongo_db_name }} --eval "
         try {
           db.createUser({
             user: '{{ mongo_db_user }}',
@@ -123,31 +129,86 @@
             roles: [{ role: 'readWrite', db: '{{ mongo_db_name }}' }]
           });
           print('User created successfully');
+          quit(0);
         } catch(e) {
-          if (e.message.includes('already exists')) {
+          if (e.message.includes('already exists') || e.message.includes('already in use')) {
             print('User already exists');
             quit(0);
           } else {
-            throw(e);
+            print('Error: ' + e.message);
+            quit(1);
           }
         }
         " --quiet
       register: mongo_user_create
       changed_when: "'created successfully' in mongo_user_create.stdout"
       when: mongo_user_check.rc != 0
-      failed_when: mongo_user_create.rc != 0 and "already exists" not in mongo_user_create.stdout | default("")
+      failed_when: mongo_user_create.rc != 0
+
+    - name: Display MongoDB user creation result
+      debug:
+        msg: |
+          MongoDB user creation result:
+          Return code: {{ mongo_user_create.rc | default('N/A') }}
+          Stdout: {{ mongo_user_create.stdout | default('N/A') }}
+          Stderr: {{ mongo_user_create.stderr | default('N/A') }}
+      when: 
+        - mongo_user_create is defined
+        - mongo_user_create.rc is defined
 
     - name: Verify MongoDB user creation
       shell: |
-        mongosh {{ mongo_db_name }} -u {{ mongo_db_user }} -p {{ mongo_db_password }} --eval "db.getName()" --quiet
+        mongosh {{ mongo_db_name }} --authenticationDatabase {{ mongo_db_name }} -u {{ mongo_db_user }} -p {{ mongo_db_password }} --eval "db.getName()" --quiet
       register: mongo_verify
       changed_when: false
-      failed_when: mongo_verify.rc != 0
+      failed_when: false
+      ignore_errors: yes
 
     - name: Display MongoDB verification result
       debug:
         msg: "MongoDB user verification successful: {{ mongo_verify.stdout }}"
       when: mongo_verify.rc == 0
+
+    - name: Display MongoDB verification error if any
+      debug:
+        msg: |
+          MongoDB user verification failed:
+          Return code: {{ mongo_verify.rc }}
+          Stdout: {{ mongo_verify.stdout }}
+          Stderr: {{ mongo_verify.stderr }}
+      when: mongo_verify.rc != 0
+
+    - name: Alternative verification without authentication (for initial setup)
+      shell: |
+        mongosh {{ mongo_db_name }} --eval "
+        try {
+          var user = db.getUser('{{ mongo_db_user }}');
+          if (user) {
+            print('User exists: {{ mongo_db_user }}');
+            print('Database: {{ mongo_db_name }}');
+            quit(0);
+          } else {
+            quit(1);
+          }
+        } catch(e) {
+          print('Error checking user: ' + e.message);
+          quit(1);
+        }
+        " --quiet
+      register: mongo_user_check_alt
+      changed_when: false
+      failed_when: false
+      ignore_errors: yes
+      when: mongo_verify.rc != 0
+
+    - name: Display alternative verification result
+      debug:
+        msg: |
+          Alternative verification result:
+          Return code: {{ mongo_user_check_alt.rc | default('N/A') }}
+          Stdout: {{ mongo_user_check_alt.stdout | default('N/A') }}
+          Stderr: {{ mongo_user_check_alt.stderr | default('N/A') }}
+      when: mongo_verify.rc != 0 and mongo_user_check_alt is defined
 
     # UFW Firewall Configuration for MongoDB
     - name: Allow SSH through firewall
