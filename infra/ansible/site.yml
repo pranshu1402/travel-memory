@@ -1,0 +1,39 @@
+---
+# Main Ansible Playbook - Site-wide Configuration
+# This playbook orchestrates the entire infrastructure setup
+
+- name: Complete TravelMemory Infrastructure Setup
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Display setup information
+      debug:
+        msg: "Starting TravelMemory infrastructure setup for {{ inventory_hostname }}"
+
+# Security Hardening First
+- import_playbook: security-hardening.yml
+
+# Database Server Setup
+- import_playbook: db-server.yml
+
+# Web Server Setup (depends on database being ready)
+- import_playbook: web-server.yml
+
+- name: Final Status Check
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Display completion message
+      debug:
+        msg: "TravelMemory infrastructure setup completed successfully!"
+
+    - name: Show system information
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          IP: {{ ansible_default_ipv4.address }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+

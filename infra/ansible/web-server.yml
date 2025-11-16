@@ -1,0 +1,236 @@
+---
+# Ansible Playbook for Web Server Setup
+# MERN Web Server - Node.js, React, Nginx, PM2
+
+- name: Configure MERN Web Server
+  hosts: web_servers
+  become: yes
+  vars:
+    app_user: ubuntu
+    app_dir: /home/{{ app_user }}/TravelMemory
+    repo_url: https://github.com/UnpredictablePrashant/TravelMemory.git
+    node_version: "18"
+    backend_port: 3001
+    mongo_uri_default: "mongodb://172.31.66.174:27017/travelmemory"
+    frontend_backend_url_default: "http://54.212.109.154:3001"
+  
+  pre_tasks:
+    - name: Set mongo_uri with default
+      set_fact:
+        mongo_uri: "{{ mongo_uri | default(mongo_uri_default) }}"
+    
+    - name: Set frontend_backend_url with default
+      set_fact:
+        frontend_backend_url: "{{ frontend_backend_url | default(frontend_backend_url_default) }}"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - git
+          - build-essential
+          - nginx
+          - ufw
+        state: present
+
+    # Node.js v18 Installation
+    - name: Add NodeSource repository for Node.js v18
+      shell: curl -s https://deb.nodesource.com/setup_{{ node_version }}.x | bash -
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js and NPM
+      apt:
+        name:
+          - nodejs
+        state: present
+        update_cache: yes
+
+    - name: Verify Node.js version
+      command: node --version
+      register: node_version_output
+      changed_when: false
+
+    - name: Display Node.js version
+      debug:
+        msg: "Node.js version: {{ node_version_output.stdout }}"
+
+    # Install PM2 globally
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
+        state: present
+
+    # Clone TravelMemory repository
+    - name: Check if TravelMemory directory exists
+      stat:
+        path: "{{ app_dir }}"
+      register: app_dir_stat
+
+    - name: Remove existing TravelMemory directory if exists
+      file:
+        path: "{{ app_dir }}"
+        state: absent
+      when: app_dir_stat.stat.exists
+
+    - name: Clone TravelMemory repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    # Backend Setup
+    - name: Install backend dependencies
+      npm:
+        path: "{{ app_dir }}/backend"
+        state: present
+
+    - name: Create backend .env file
+      copy:
+        content: |
+          MONGO_URI={{ mongo_uri }}
+          PORT={{ backend_port }}
+        dest: "{{ app_dir }}/backend/.env"
+        mode: '0644'
+
+    - name: Create PM2 ecosystem config for backend
+      copy:
+        content: |
+          module.exports = {
+            apps: [
+              {
+                name: "backend-app",
+                script: "index.js",
+                cwd: "{{ app_dir }}/backend",
+                watch: false,
+                autorestart: true,
+                env: {
+                  NODE_ENV: "production"
+                },
+                env_file: "{{ app_dir }}/backend/.env"
+              },
+            ],
+          };
+        dest: "{{ app_dir }}/backend/ecosystem.config.js"
+        mode: '0644'
+
+    - name: Stop existing PM2 backend process if running
+      shell: pm2 stop backend-app || true
+      ignore_errors: yes
+
+    - name: Delete existing PM2 backend process if exists
+      shell: pm2 delete backend-app || true
+      ignore_errors: yes
+
+    - name: Start backend with PM2
+      shell: pm2 start ecosystem.config.js
+      args:
+        chdir: "{{ app_dir }}/backend"
+      register: pm2_start_result
+
+    - name: Save PM2 process list
+      shell: pm2 save
+      ignore_errors: yes
+
+    - name: Setup PM2 startup script
+      shell: pm2 startup systemd -u {{ app_user }} --hp /home/{{ app_user }}
+      register: pm2_startup_output
+      changed_when: false
+
+    - name: Verify backend is running
+      uri:
+        url: "http://localhost:{{ backend_port }}/hello"
+        method: GET
+      register: backend_health
+      retries: 5
+      delay: 10
+      until: backend_health.status == 200
+
+    - name: Display backend health check result
+      debug:
+        msg: "Backend is running: {{ backend_health.content }}"
+
+    # Frontend Setup
+    - name: Install frontend dependencies
+      npm:
+        path: "{{ app_dir }}/frontend"
+        state: present
+
+    - name: Create frontend .env file
+      copy:
+        content: |
+          REACT_APP_BACKEND_URL={{ frontend_backend_url }}
+        dest: "{{ app_dir }}/frontend/.env"
+        mode: '0644'
+
+    - name: Build frontend
+      npm:
+        path: "{{ app_dir }}/frontend"
+        run: build
+
+    - name: Create nginx web directory if not exists
+      file:
+        path: /var/www/html
+        state: directory
+        mode: '0755'
+
+    - name: Remove existing nginx default content
+      file:
+        path: /var/www/html/{{ item }}
+        state: absent
+      loop:
+        - index.html
+        - index.nginx-debian.html
+
+    - name: Copy frontend build to nginx directory
+      copy:
+        src: "{{ app_dir }}/frontend/build/"
+        dest: /var/www/html/
+        mode: preserve
+
+    # Nginx Configuration
+    - name: Configure Nginx for React app and API proxy
+      blockinfile:
+        path: /etc/nginx/sites-available/default
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - React App Config"
+        block: |
+          location /api/ {
+              rewrite ^/api(/.*)$ $1 break;
+              proxy_pass http://localhost:{{ backend_port }};
+              
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection 'upgrade';
+              proxy_set_header Host $host;
+              proxy_cache_bypass $http_upgrade;
+          }
+
+          ## To always load react app on any other route
+          location / {
+                  try_files $uri $uri/ /index.html;
+          }
+
+    - name: Test nginx configuration
+      command: nginx -t
+      changed_when: false
+
+    - name: Restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+    - name: Ensure nginx is running
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+

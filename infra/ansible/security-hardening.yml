@@ -1,0 +1,119 @@
+---
+# Ansible Playbook for SSH Hardening and Security Configuration
+# Apply on both web and database servers
+
+- name: Security Hardening - SSH and System Configuration
+  hosts: all
+  become: yes
+
+  tasks:
+    # SSH Hardening
+    - name: Backup SSH config
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: /etc/ssh/sshd_config.backup
+        remote_src: yes
+      changed_when: false
+
+    - name: Disable root login via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        backup: yes
+
+    - name: Disable password authentication (use SSH keys only)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        backup: yes
+
+    - name: Enable public key authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        backup: yes
+
+    - name: Set SSH protocol version 2 only
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Protocol'
+        line: 'Protocol 2'
+        backup: yes
+
+    - name: Disable empty passwords
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitEmptyPasswords'
+        line: 'PermitEmptyPasswords no'
+        backup: yes
+
+    - name: Set MaxAuthTries
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?MaxAuthTries'
+        line: 'MaxAuthTries 3'
+        backup: yes
+
+    - name: Test SSH configuration
+      command: sshd -t
+      changed_when: false
+
+    - name: Restart SSH service
+      systemd:
+        name: sshd
+        state: restarted
+
+    # UFW Firewall for Web Servers
+    - name: Allow HTTP through firewall (Web Servers)
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+        comment: 'HTTP access'
+      when: "'web_servers' in group_names"
+
+    - name: Allow HTTPS through firewall (Web Servers)
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+        comment: 'HTTPS access'
+      when: "'web_servers' in group_names"
+
+    - name: Allow SSH through firewall
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+        comment: 'SSH access'
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        policy: deny
+
+    # System Updates
+    - name: Update all packages to latest version
+      apt:
+        upgrade: dist
+        update_cache: yes
+
+    - name: Install unattended-upgrades for automatic security updates
+      apt:
+        name: unattended-upgrades
+        state: present
+
+    - name: Enable automatic security updates
+      lineinfile:
+        path: /etc/apt/apt.conf.d/50unattended-upgrades
+        regexp: '^//\s+"${distro_id}:${distro_codename}-updates";'
+        line: '"${distro_id}:${distro_codename}-updates";'
+        backup: yes
+
+    - name: Display security hardening completion message
+      debug:
+        msg: "Security hardening completed. SSH root login disabled, password authentication disabled, UFW enabled."
+

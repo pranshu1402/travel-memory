@@ -1,0 +1,17 @@
+# Common Variables for All Hosts
+
+# Application Configuration
+app_name: "TravelMemory"
+app_user: "ubuntu"
+app_dir: "/home/ubuntu/TravelMemory"
+repo_url: "https://github.com/UnpredictablePrashant/TravelMemory.git"
+
+# Node.js Configuration
+node_version: "18"
+backend_port: 3001
+
+# MongoDB Configuration
+mongo_version: "7.0"
+mongo_db_name: "travelmemory"
+mongo_db_user: "traveluser"
+mongo_db_password: "traveluser"

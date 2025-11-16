@@ -1,0 +1,23 @@
+# Ansible Inventory File
+# Use public IPs from Terraform outputs
+# Example: ansible-playbook -i inventory.yml site.yml --extra-vars "web_server_ip=1.2.3.4 db_server_ip=5.6.7.8"
+
+all:
+  children:
+    web_servers:
+      hosts:
+        web_server:
+          ansible_host: "{{ web_server_ip | default('54.212.109.154') }}"
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/pranshu_k.pem
+          # Or use ansible_ssh_common_args for SSH config
+          # ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    
+    db_servers:
+      hosts:
+        db_server:
+          ansible_host: "{{ db_server_ip | default('34.221.109.77') }}"
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: ~/.ssh/pranshu_k.pem
+          # Or use ansible_ssh_common_args for SSH config
+          # ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

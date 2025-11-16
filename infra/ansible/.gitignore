@@ -1,0 +1,32 @@
+# Ansible .gitignore
+
+# Inventory files with sensitive information
+inventory.ini
+hosts.ini
+*.pem
+*.key
+
+# Ansible vault files
+*.vault
+*.secret
+
+# Ansible retry files
+*.retry
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
